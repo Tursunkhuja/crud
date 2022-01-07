@@ -10,6 +10,7 @@ import (
 
 	"github.com/Tursunkhuja/crud/cmd/app"
 	"github.com/Tursunkhuja/crud/pkg/customers"
+	"github.com/gorilla/mux"
 	"github.com/jackc/pgx/v4/pgxpool"
 	"go.uber.org/dig"
 )
@@ -29,7 +30,7 @@ func main() {
 func execute(host string, port string, dns string) (err error) {
 	deps := []interface{}{
 		app.NewServer,
-		http.NewServeMux,
+		mux.NewRouter,
 		func() (*pgxpool.Pool, error) {
 			ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
 			return pgxpool.Connect(ctx, dns)
