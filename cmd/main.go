@@ -1,14 +1,17 @@
 package main
 
 import (
-	"database/sql"
+	"context"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/Tursunkhuja/crud/cmd/app"
 	"github.com/Tursunkhuja/crud/pkg/customers"
+	"github.com/jackc/pgx/v4/pgxpool"
+	"go.uber.org/dig"
 )
 
 func main() {
@@ -24,27 +27,39 @@ func main() {
 
 // Func start server
 func execute(host string, port string, dns string) (err error) {
-	db, err := sql.Open("pgx", dns)
-	if err != nil {
-		return nil
-	}
-	defer func() {
-		if cerr := db.Close(); cerr != nil {
-			if err == nil {
-				err = cerr
-				return
-			}
-			log.Println(err)
-		}
-	}()
-	mux := http.NewServeMux()
-	customerSvc := customers.NewService(db)
-	server := app.NewServer(mux, customerSvc)
-	server.Init()
+	deps := []interface{}{
+		app.NewServer,
+		http.NewServeMux,
+		func() (*pgxpool.Pool, error) {
+			ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
+			return pgxpool.Connect(ctx, dns)
+		},
 
-	svr := &http.Server{
-		Addr:    net.JoinHostPort(host, port),
-		Handler: server,
+		customers.NewService,
+		func(server *app.Server) *http.Server {
+			return &http.Server{
+				Addr:    net.JoinHostPort(host, port),
+				Handler: server,
+			}
+		},
 	}
-	return svr.ListenAndServe()
+
+	container := dig.New()
+	for _, dep := range deps {
+		err = container.Provide(dep)
+		if err != nil {
+			return err
+		}
+	}
+
+	err = container.Invoke(func(server *app.Server) {
+		server.Init()
+	})
+	if err != nil {
+		return err
+	}
+
+	return container.Invoke(func(server *http.Server) error {
+		return server.ListenAndServe()
+	})
 }
